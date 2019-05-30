@@ -4,6 +4,7 @@ package fileio
 // modification instead of split into individual lines
 
 import (
+	"bufio"
 	"context"
 	"io/ioutil"
 	"strings"
@@ -74,4 +75,52 @@ func readFn(ctx context.Context, filename string, emit func(string)) error {
 	}
 	emit(string(fileBytes))
 	return nil
+}
+
+// Write writes a PCollection<[]byte> to a file.
+func Write(s beam.Scope, filename string, col beam.PCollection) {
+	s = s.Scope("textio.Write")
+
+	filesystem.ValidateScheme(filename)
+
+	pre := beam.AddFixedKey(s, col)
+	post := beam.GroupByKey(s, pre)
+	beam.ParDo0(s, &writeFileFn{Filename: filename}, post)
+}
+
+type writeFileFn struct {
+	Filename string `json:"filename"`
+}
+
+func (w *writeFileFn) ProcessElement(ctx context.Context, _ int, bytes func(*[]byte) bool) error {
+	fs, err := filesystem.New(ctx, w.Filename)
+	if err != nil {
+		return err
+	}
+	defer fs.Close()
+
+	fd, err := fs.OpenWrite(ctx, w.Filename)
+	if err != nil {
+		return err
+	}
+	buf := bufio.NewWriterSize(fd, 1<<20) // use 1MB buffer
+
+	log.Infof(ctx, "Writing to %v", w.Filename)
+
+	var b []byte
+	for bytes(&b) {
+		n, err := buf.Write(b)
+		if err != nil {
+			log.Errorf(ctx, "Could not write to file: %v", err)
+			return err
+		}
+		if n != len(b) {
+			log.Errorf(ctx, "did not write all bytes to buffer: wrote %d, expected %d", n, len(b))
+		}
+	}
+	if err := buf.Flush(); err != nil {
+		log.Errorf(ctx, "error flushing buffer: %v", err)
+		return err
+	}
+	return fd.Close()
 }
