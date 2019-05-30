@@ -81,7 +81,7 @@ func readFn(ctx context.Context, filename string, emit func(string)) error {
 
 // Write writes a PCollection<[]byte> to a file.
 func Write(s beam.Scope, filename string, col beam.PCollection) {
-	s = s.Scope("textio.Write")
+	s = s.Scope("fileio.Write")
 
 	filesystem.ValidateScheme(filename)
 
