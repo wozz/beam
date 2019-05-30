@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"context"
 	"io/ioutil"
+	"reflect"
 	"strings"
 
 	"github.com/apache/beam/sdks/go/pkg/beam"
@@ -15,6 +16,7 @@ import (
 )
 
 func init() {
+	beam.RegisterType(reflect.TypeOf((*writeFileFn)(nil)).Elem())
 	beam.RegisterFunction(readFn)
 	beam.RegisterFunction(expandFn)
 }
