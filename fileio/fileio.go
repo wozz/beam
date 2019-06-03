@@ -6,6 +6,7 @@ package fileio
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"io/ioutil"
 	"reflect"
 	"strings"
@@ -17,6 +18,7 @@ import (
 
 func init() {
 	beam.RegisterType(reflect.TypeOf((*writeFileFn)(nil)).Elem())
+	beam.RegisterType(reflect.TypeOf((*writeFileFmtFn)(nil)).Elem())
 	beam.RegisterFunction(readFn)
 	beam.RegisterFunction(expandFn)
 }
@@ -119,6 +121,47 @@ func (w *writeFileFn) ProcessElement(ctx context.Context, _ int, bytes func(*[]b
 		if n != len(b) {
 			log.Errorf(ctx, "did not write all bytes to buffer: wrote %d, expected %d", n, len(b))
 		}
+	}
+	if err := buf.Flush(); err != nil {
+		log.Errorf(ctx, "error flushing buffer: %v", err)
+		return err
+	}
+	return fd.Close()
+}
+
+// WritePerKey writes a PCollection<KV<int, []byte>> to a set of files.
+// Provide the filename format, which will be used with the int key to form each
+// filename.
+func WritePerKey(s beam.Scope, filenameFormat string, col beam.PCollection) {
+	s = s.Scope("fileio.WritePerKey")
+
+	filesystem.ValidateScheme(fmt.Sprintf(filenameFormat, 0))
+	beam.ParDo0(s, &writeFileFmtFn{FilenameFormat: filenameFormat}, col)
+}
+
+type writeFileFmtFn struct {
+	FilenameFormat string `json:"filenameFmt"`
+}
+
+func (w writeFileFmtFn) ProcessElement(ctx context.Context, i int, bytes []byte) error {
+	filename := fmt.Sprintf(w.FilenameFormat, i)
+	fs, err := filesystem.New(ctx, filename)
+	if err != nil {
+		return err
+	}
+	defer fs.Close()
+	fd, err := fs.OpenWrite(ctx, filename)
+	if err != nil {
+		return err
+	}
+	buf := bufio.NewWriterSize(fd, 1<<20) // use 1MB buffer
+	n, err := buf.Write(bytes)
+	if err != nil {
+		log.Errorf(ctx, "Cloud not write to file: %s %v", filename, err)
+		return err
+	}
+	if n != len(bytes) {
+		log.Errorf(ctx, "did not write all bytes to buffer: wrote %d, expected %d", n, len(bytes))
 	}
 	if err := buf.Flush(); err != nil {
 		log.Errorf(ctx, "error flushing buffer: %v", err)
